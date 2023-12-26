@@ -723,7 +723,7 @@ Some other benefits of Helm is:
 ### Configure the pipeline:
 
 ```yaml
-build&pushImage:
+buildImage:
     working_directory: /go/src/hello-app (1)
     docker:
       - image: circleci/golang:1.10 (2)
@@ -826,25 +826,6 @@ deploy:
 12. Execute the release-helloapp.sh shell script and pass it TAG value from step 4.
 
 In the release-helloapp.sh script we first start tiller, after this, we check if the release is already present or not if it is present then we upgrade otherwise we make a new release. Here we override the value of tag for the image present in the chart by setting it to the tag of the newly built image, finally, we stop the tiller server.
-
-
-
-```shell
-#!/bin/bash
-TAG=$1
-echo "start tiller"
-export KUBECONFIG=$HOME/.kube/kubeconfig
-helm tiller start-ci
-export HELM_HOST=127.0.0.1:44134
-result=$(eval helm ls | grep helloapp) 
-if [ $? -ne "0" ]; then 
-   helm install --timeout 180 --name helloapp --set image.tag=$TAG charts/helloapp
-else 
-   helm upgrade --timeout 180 helloapp --set image.tag=$TAG charts/helloapp
-fi
-echo "stop tiller"
-helm tiller stop 
-```
 
 
 
