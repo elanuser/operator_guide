@@ -1,0 +1,7 @@
+apiVersion: v1
+appVersion: "1.0"
+description: Helm chart for book store application.
+keywords:
+- bookstore
+name: book-store
+version: 0.1.0

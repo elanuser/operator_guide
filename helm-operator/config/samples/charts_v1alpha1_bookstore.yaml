@@ -1,0 +1,31 @@
+apiVersion: charts.example.com/v1alpha1
+kind: BookStore
+metadata:
+  name: bookstore-sample
+spec:
+  # Default values copied from <project_dir>/helm-charts/book-store/values.yaml
+  affinity: {}
+  image:
+    app:
+      pullPolicy: IfNotPresent
+      repository: akash125/pyapp
+      tag: latest
+    mongodb:
+      pullPolicy: IfNotPresent
+      repository: mongo
+      tag: latest
+  nodeSelector: {}
+  replicaCount: 1
+  resources: {}
+  service:
+    app:
+      port: 80
+      targetPort: 3000
+      type: LoadBalancer
+    mongodb:
+      port: 27017
+      targetPort: 27017
+      type: ClusterIP
+  tolerations: []
+  
+  

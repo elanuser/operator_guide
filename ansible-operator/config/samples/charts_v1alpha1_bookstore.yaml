@@ -1,0 +1,28 @@
+apiVersion: charts.example.com/v1alpha1
+kind: BookStore
+metadata:
+  labels:
+    app.kubernetes.io/name: bookstore
+    app.kubernetes.io/instance: bookstore-sample
+    app.kubernetes.io/part-of: ansible-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: ansible-operator
+  name: bookstore-sample
+  namespace: default
+spec:
+  metadata:
+    namespace: default
+  image:
+    app:
+      repository: akash125/pyapp
+      tag: latest
+      pullPolicy: Always
+    mongodb:
+      repository: mongo
+      tag: latest
+      pullPolicy: Always
+  service:
+    app:
+      type: ClusterIP
+    mongodb:
+      type: ClusterIP

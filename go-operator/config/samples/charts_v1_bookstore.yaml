@@ -1,0 +1,27 @@
+apiVersion: charts.example.com/v1
+kind: BookStore
+metadata:
+  labels:
+    app.kubernetes.io/name: bookstore
+    app.kubernetes.io/instance: bookstore-sample
+    app.kubernetes.io/part-of: go-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: go-operator
+  name: bookstore
+  namespace: go-operator-system
+spec:
+  bookApp: 
+    repository: "akash125/pyapp"
+    tag: latest
+    imagePullPolicy: "Always"
+    replicas: 1
+    port: 80
+    targetPort: 3000
+    serviceType: "ClusterIP"
+  bookDB:
+    repository: "mongo"
+    tag: latest
+    imagePullPolicy: "Always"
+    replicas: 1
+    port: 27017
+    dbSize: 2Gi
