@@ -24,4 +24,5 @@ spec:
     imagePullPolicy: "Always"
     replicas: 1
     port: 27017
-    dbSize: 2Gi
+    dbSize: 20Gi
+    storageClass: "default"

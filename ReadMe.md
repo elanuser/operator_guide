@@ -4,7 +4,7 @@
 
 Whenever we deploy our application on Kubernetes we leverage multiple Kubernetes objects like deployment, service, role, ingress, config map, etc. As our application gets complex and our requirements become non-generic, managing our application only with the help of native Kubernetes objects becomes difficult and we often need to introduce manual intervention or some other form of automation to make up for it.
 
-Operators solve this problem by making our application first class Kubernetes objects that is we no longer deploy our application as a set of native Kubernetes objects but a custom object/resource of its kind, having a more domain-specific schema and then we bake the “operational intelligence” or the “domain-specific knowledge” into the controller responsible for maintaining the desired state of this object. For example, etcd operator has made etcd-cluster a first class object and for deploying the cluster we create an object of Etcd Cluster kind. With operators, we are able to extend Kubernetes functionalities for custom use cases and manage our applications in a Kubernetes specific way allowing us to leverage Kubernetes APIs and Kubectl tooling.
+Operators solve this problem by making our application first-class Kubernetes objects that is we no longer deploy our application as a set of native Kubernetes objects but a custom object/resource of its kind, having a more domain-specific schema and then we bake the “operational intelligence” or the “domain-specific knowledge” into the controller responsible for maintaining the desired state of this object. For example, the etcd operator has made the etcd-cluster a first-class object and for deploying the cluster we create an object of Etcd Cluster kind. With operators, we are able to extend Kubernetes functionalities for custom use cases and manage our applications in a Kubernetes-specific way allowing us to leverage Kubernetes APIs and Kubectl tooling.
 
 Operators combine CRD and custom controllers and intend to eliminate the requirement for manual intervention (human operator) while performing tasks like an upgrade, handling failure recovery, scaling in case of complex (often stateful) applications and make them more resilient and self-sufficient.
 
@@ -93,7 +93,7 @@ spec:
   image:
     app:
       pullPolicy: IfNotPresent
-      repository: akash125/pyapp
+      repository: custom/pyapp
       tag: latest
     mongodb:
       pullPolicy: IfNotPresent
@@ -283,7 +283,7 @@ spec:
     namespace: default
   image:
     app:
-      repository: akash125/pyapp
+      repository: custom/pyapp
       tag: latest
       pullPolicy: Always
     mongodb:
@@ -524,7 +524,7 @@ kind: BookStore
 metadata:name: bookstore-sample
 spec:
   bookApp: 
-    repository: "akash125/pyapp"
+    repository: "custom/pyapp"
     tag: latest
     imagePullPolicy: "Always"
     replicas: 1
@@ -632,65 +632,121 @@ The implementation of the above method is a bit hacky but gives an idea of the f
 
 ```yaml
   ownerReferences:
-  - apiVersion: blog.velotio.com/v1alpha1
+  - apiVersion: charts.example.com/v1
     blockOwnerDeletion: true
     controller: true
     kind: BookStore
-    name: example-bookstore
-    uid: 0ef42889-deb4-11e9-ba56-42010a800256
+    name: bookstore
+    uid: 38f512ef-018b-4842-a868-44cb702d1683
 ```
 
 ### 4.  Deploy the operator and verify it works
 
-Before we deploy the operator, the docker image 
+Before we deploy the operator, the docker image should be built and pushed to the remote docker registry.
 
-```
+```sh
 make docker-build docker-push IMG="${DOCKER_USER}/bookstore-operator-go:0.0.1"
 ```
 
-Deploy the operator and artifacts
+After the docker image is ready; the next step is to deploy the operator 
 
-```
+```sh
 make deploy IMG="${DOCKER_USER}/bookstore-operator-go:0.0.1"
+k -n go-operator-system delete pods -l control-plane=controller-manager
+k -n go-operator-system logs -l control-plane=controller-manager -f
+```
+
+Below, we can observe the outcome from the cluster.
+
+```sh
+# k -n go-operator-system get pods -l control-plane=controller-manager
+NAME                                              READY   STATUS    RESTARTS   AGE
+go-operator-controller-manager-64b5d5f959-6rd89   2/2     Running   0          52s
+
+# k -n go-operator-system logs -l control-plane=controller-manager -f
+I1227 11:20:35.907770       1 leaderelection.go:258] successfully acquired lease go-operator-system/333fff00.example.com
+2023-12-27T11:20:35Z	DEBUG	events	go-operator-controller-manager-64b5d5f959-vk2p8_59a96f5a-1fcf-48e9-ac46-41e3fab11b9e became leader	{"type": "Normal", "object": {"kind":"Lease","namespace":"go-operator-system","name":"333fff00.example.com","uid":"15d48030-fcdd-4d7e-a1ae-f4b4e4d6b0e7","apiVersion":"coordination.k8s.io/v1","resourceVersion":"388475"}, "reason": "LeaderElection"}
+2023-12-27T11:20:35Z	INFO	Starting EventSource	{"controller": "bookstore", "controllerGroup": "charts.example.com", "controllerKind": "BookStore", "source": "kind source: *v1.BookStore"}
+2023-12-27T11:20:35Z	INFO	Starting Controller	{"controller": "bookstore", "controllerGroup": "charts.example.com", "controllerKind": "BookStore"}
+2023-12-27T11:20:36Z	INFO	Starting workers	{"controller": "bookstore", "controllerGroup": "charts.example.com", "controllerKind": "BookStore", "worker count": 1}
+```
+
+Finally,  Deploy the operator and artifacts to the cluster.
+
+```sh
 k apply -f config/samples/charts_v1_bookstore.yaml
 ```
 
 The approach to deploy and verify the working of the bookstore application is similar to what we did before, the only difference being that now we have deployed the MongoDB as a stateful set and even if we restart the pod we will see that the information that we stored will still be available.
 
-![Kubernetes Golang 1.png](https://assets-global.website-files.com/5d2dd7e1b4a76d8b803ac1aa/5dfc8c939c9c5c22ce2441ae_Kubernetes%2BGolang%2B1.png)
+```sh
+# k get pods
+NAME                                              READY   STATUS             RESTARTS        AGE
+bookstore-85b84c8fc5-d6d8l                        1/1     Running            0               25m
+go-operator-controller-manager-64b5d5f959-vk2p8   2/2     Running            0               43s
+mongodb-0                                         1/1     Running            0               23s
+```
+
+
 
 ### 5. Verify volume expansion
 
 For updating the volume associated with the Mongodb instance we first need to update the size of the volume we specified while creating the bookstore object. 
 
-In the example above I had set it to 2GB let’s increase it to 3GB and update the bookstore object.
+In the example above, I increased the volume from 2GB to 20GB in the bookstore object.
 
 Once the bookstore object is updated if we describe the mongodb PVC we will see that it still has 2GB PV but the conditions we will see something like this.
 
-```
+```sh
+# k describe pvc mongodb-pvc-mongodb-0
+Name:          mongodb-pvc-mongodb-0
+Used By:       mongodb-0
 Conditions:
   Type                      Status  LastProbeTime                     LastTransitionTime                Reason  Message
   ----                      ------  -----------------                 ------------------                ------  -------
-  FileSystemResizePending   True    Mon, 01 Jan 0001 00:00:00 +0000   Mon, 30 Sep 2019 15:07:01 +0530           Waiting for user to (re-)start a pod to finish file system resize of volume on node.
-@velotiotech
+Events:
+  Type     Reason                    Age                From                                                                                        Message
+  ----     ------                    ----               ----                                                                                        -------
+  Normal   WaitForFirstConsumer      17m                persistentvolume-controller                                                                 waiting for first consumer to be created before binding
+  Normal   Provisioning              17m                ebs.csi.aws.com_csi-driver-controller-9d88b6dfc-6827n_5a83b3fc-a9e0-4601-84db-934ea6224f24  External provisioner is provisioning volume for claim "go-operator-system/mongodb-pvc-mongodb-0"
+  Normal   ExternalProvisioning      17m (x3 over 17m)  persistentvolume-controller                                                                 waiting for a volume to be created, either by external provisioner "ebs.csi.aws.com" or manually created by system administrator
+  Normal   ProvisioningSucceeded     17m                ebs.csi.aws.com_csi-driver-controller-9d88b6dfc-6827n_5a83b3fc-a9e0-4601-84db-934ea6224f24  Successfully provisioned volume pv-2e26-475c-80fa-e4c2d9704813
+  Warning  ExternalExpanding         7m21s              volume_expand                                                                               Ignoring the PVC: didn't find a plugin capable of expanding the volume; waiting for an external controller to process this PVC.
+  Normal   Resizing                  7m21s              external-resizer ebs.csi.aws.com                                                            External resizer is resizing volume pv-2e26-475c-80fa-e4c2d9704813
+  Normal   FileSystemResizeRequired  7m15s              external-resizer ebs.csi.aws.com                                                            Require file system resize of volume on node
  
 ```
 
 It is clear from the message that we need to restart the pod for resizing of volume to reflect. Once we delete the pod it will get restarted and the PVC will get updated to reflect the expanded volume size.
 
-![Kubernetes Golang 2.png](https://assets-global.website-files.com/5d2dd7e1b4a76d8b803ac1aa/5dfc8c937a4372973e1e56ef_Kubernetes%2BGolang%2B2.png)
+```sh
+2023-12-27T11:20:35Z    INFO    Starting Controller     {"controller": "bookstore", "controllerGroup": "charts.example.com", "controllerKind": "BookStore"}
+2023-12-27T11:20:36Z    INFO    Starting workers        {"controller": "bookstore", "controllerGroup": "charts.example.com", "controllerKind": "BookStore", "worker count": 1}
+2023-12-27T11:20:36Z    INFO    controller_bookstore    Reconciling BookStore   {"Request.Namespace": "go-operator-system", "Request.Name": "bookstore"}
+2023-12-27T11:20:36Z    INFO    controller_bookstore    bookstore deployment updated    {"Namespace": "go-operator-system"}
+2023-12-27T11:20:36Z    INFO    controller_bookstore    bookstore service updated       {"Namespace": "go-operator-system"}
+2023-12-27T11:20:36Z    INFO    controller_bookstore    failed to retrieve mongodb StatefulSet  {"Namespace": "go-operator-system"}
+2023-12-27T11:20:36Z    INFO    controller_bookstore    start to create the mongodb StatefulSet {"Namespace": "go-operator-system"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    Reconciling BookStore   {"Request.Namespace": "go-operator-system", "Request.Name": "bookstore"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    bookstore deployment updated    {"Namespace": "go-operator-system"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    bookstore service updated       {"Namespace": "go-operator-system"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    Need to expand the mongodb volume       {"Namespace": "go-operator-system"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    mongodb volume updated successfully     {"Namespace": "go-operator-system"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    mongodb StatefulSet updated     {"Namespace": "go-operator-system"}
+2023-12-27T11:31:01Z    INFO    controller_bookstore    mongodb-service updated {"Namespace": "go-operator-system"}
+```
+
 
 ## Conclusion
 
-Golang based operators are built mostly for [stateful applications](https://www.velotio.com/engineering-blog/exploring-upgrade-strategies-for-stateful-sets-in-kubernetes) like databases. The operator can automate complex operational tasks allow us to run applications with ease. At the same time, building and maintaining it can be quite complex and we should build one only when we are fully convinced that our requirements can’t be met with any other type of operator. Operators are an interesting and emerging area in Kubernetes and I hope this blog series on getting started with it help the readers in learning the basics of it.
-
+Golang-based operators are built mostly for stateful applications like databases. The operator can automate complex operational tasks allowing us to run applications with ease. At the same time, building and maintaining it can be quite complex and we should build one only when we are fully convinced that our requirements can’t be met with any other type of operator. Operators are an interesting and emerging area in Kubernetes and I hope this blog series on getting started with it helps the readers in learning the basics of it.
 
 
 # Continuous Integration & Delivery (CI/CD)
 
 ## Introduction
 
-Kubernetes is getting adopted rapidly across the software industry and is becoming the most preferred option for deploying and managing containerized applications. Once we have a fully functional [Kubernetes cluster](https://www.velotio.com/engineering-blog/the-ultimate-guide-to-disaster-recovery-for-your-kubernetes-clusters) we need to have an automated process to deploy our applications on it. In this blog post, we will create a fully automated “commit to deploy” pipeline for Kubernetes. We will use CircleCI & helm for it.
+Kubernetes is getting adopted rapidly across the software industry and is becoming the most preferred option for deploying and managing containerized applications. Once we have fully functional operators we need to have an automated process to deploy the operator to the Kubernetes cluster. In this blog post, we will create a fully automated `commit to deploy` a pipeline for Kubernetes. We will use CircleCI to achieve this goal.
 
 ## What is CircleCI?
 
@@ -704,17 +760,7 @@ Some excellent features of CircleCI are:
 2. User authentication is done via GitHub so user management is quite simple.
 3. It automatically notifies the build status on the GitHub email IDs of the users who are following the project on CircleCI.
 4. The UI is quite simple and gives a holistic view of builds.
-5. Can be integrated with Slack, Jira, etc.
-
-## What is Helm?
-
-Helm is a chart manager where a chart refers to the package of Kubernetes resources. Helm allows us to bundle related Kubernetes objects into charts and treat them as a single unit of deployment referred to as release.  For example, you have an application app1 which you want to run on Kubernetes. For this app1 you create multiple Kubernetes resources like deployment, service, ingress, horizontal pod scaler, etc. Now while deploying the application you need to create all the Kubernetes resources separately by applying their manifest files. What Helm does is it allows us to group all those files into one chart ([Helm chart](https://www.velotio.com/engineering-blog/helm-3)) and then we just need to deploy the chart. This also makes deleting and upgrading the resources quite simple.
-
-Some other benefits of Helm is:
-
-1. It makes the deployment highly configurable. Thus just by changing the parameters, we can use the same chart for deploying on multiple environments like stag/prod or multiple cloud providers.
-2. We can roll back to a previous release with a single helm command.
-3. It makes managing and sharing Kubernetes-specific applications much simpler.
+5. Can be easily integrated with Slack, Jira, etc.
 
 ## Building the Pipeline
 
@@ -723,233 +769,89 @@ Some other benefits of Helm is:
 ### Configure the pipeline:
 
 ```yaml
-buildImage:
-    working_directory: /go/src/hello-app (1)
-    docker:
-      - image: circleci/golang:1.10 (2)
-    steps:
-      - checkout (3)
-      - run: (4)
-          name: build the binary
-          command: go build -o hello-app
-      - setup_remote_docker: (5)
-          docker_layer_caching: true
-      - run: (6)
-          name: Set the tag for the image, we will concatenate the app verson and circle build number with a `-` char in between
-          command:  echo 'export TAG=$(cat VERSION)-$CIRCLE_BUILD_NUM' >> $BASH_ENV
-      - run: (7)
-          name: Build the docker image
-          command: docker build . -t ${CIRCLE_PROJECT_REPONAME}:$TAG
-      - run: (8)
-          name: Install AWS cli
-          command: export TZ=Europe/Minsk && sudo ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > sudo  /etc/timezone && sudo apt-get update && sudo apt-get install -y awscli
-      - run: (9)
-          name: Login to ECR
-          command: $(aws ecr get-login --region $AWS_REGION | sed -e 's/-e none//g')
-      - run: (10)
-          name: Tag the image with ECR repo name 
-          command: docker tag ${CIRCLE_PROJECT_REPONAME}:$TAG ${HELLOAPP_ECR_REPO}:$TAG    
-      - run: (11)
-          name: Push the image the ECR repo
-          command: docker push ${HELLOAPP_ECR_REPO}:$TAG
-```
-
-
-
-1. We set the working directory for our job, we are setting it on the gopath so that we don’t need to do anything additional.
-2. We set the docker image inside which we want the job to run, as our app is built using golang we are using the image which already has golang installed in it.
-3. This step checks out our repository in the working directory
-4. In this step, we build the binary
-5. Here we setup docker with the help of  **setup_remote_docker** key provided by CircleCI.
-6. In this step we create the tag we will be using while building the image, we use the app version available in the VERSION file and append the $CIRCLE_BUILD_NUM value to it, separated by a dash (`-`).
-7. Here we build the image and tag.
-8. Installing AWS CLI to interact with the ECR later.
-9. Here we log into ECR
-10. We tag the image build in step 7 with the ECR repository name.
-11. Finally, we push the image to ECR.
-
-Now we will deploy our helm charts. For this, we have a separate job deploy.
-
-
-
-```yaml
-deploy:
-    docker: (1)
-        - image: circleci/golang:1.10
-    steps: (2)
-      - checkout
-      - run: (3)
-          name: Install AWS cli
-          command: export TZ=Europe/Minsk && sudo ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > sudo  /etc/timezone && sudo apt-get update && sudo apt-get install -y awscli
-      - run: (4)
-          name: Set the tag for the image, we will concatenate the app verson and circle build number with a `-` char in between
-          command:  echo 'export TAG=$(cat VERSION)-$CIRCLE_PREVIOUS_BUILD_NUM' >> $BASH_ENV
-      - run: (5)
-          name: Install and confgure kubectl
-          command: sudo curl -L https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && sudo chmod +x /usr/local/bin/kubectl  
-      - run: (6)
-          name: Install and confgure kubectl aws-iam-authenticator
-          command: curl -o aws-iam-authenticator https://amazon-eks.s3-us-west-2.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator && sudo chmod +x ./aws-iam-authenticator && sudo cp ./aws-iam-authenticator /bin/aws-iam-authenticator
-       - run: (7)
-          name: Install latest awscli version
-          command: sudo apt install unzip && curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip" && unzip awscli-bundle.zip &&./awscli-bundle/install -b ~/bin/aws
-      - run: (8)
-          name: Get the kubeconfig file 
-          command: export KUBECONFIG=$HOME/.kube/kubeconfig && /home/circleci/bin/aws eks --region $AWS_REGION update-kubeconfig --name $EKS_CLUSTER_NAME
-      - run: (9)
-          name: Install and configuire helm
-          command: sudo curl -L https://storage.googleapis.com/kubernetes-helm/helm-v2.11.0-linux-amd64.tar.gz | tar xz && sudo mv linux-amd64/helm /bin/helm && sudo rm -rf linux-amd64
-      - run: (10)
-          name: Initialize helm
-          command:  helm init --client-only --kubeconfig=$HOME/.kube/kubeconfig
-      - run: (11)
-          name: Install tiller plugin
-          command: helm plugin install https://github.com/rimusz/helm-tiller --kubeconfig=$HOME/.kube/kubeconfig        
-      - run: (12)
-          name: Release helloapp using helm chart 
-          command: bash scripts/release-helloapp.sh $TAG
-```
-
-
-
-1. Set the docker image inside which we want to execute the job.
-2. Check out the code using `checkout` key
-3. Install AWS CLI.
-4. Setting the value of tag just like we did in case of build&pushImage job. Note that here we are using CIRCLE_PREVIOUS_BUILD_NUM variable which gives us the build number of build&pushImage job and ensures that the tag values are the same.
-5. Download kubectl and making it executable.
-6. Installing aws-iam-authenticator this is required because my k8s cluster is on EKS.
-7. Here we install the latest version of AWS CLI, EKS is a relatively newer service from AWS and older versions of AWS CLI doesn’t have it.
-8. Here we fetch the kubeconfig file. This step will vary depending upon where the k8s cluster has been set up. As my cluster is on EKS am getting the kubeconfig file via. AWS CLI similarly if your cluster in on GKE then you need to configure gcloud and use the command  `gcloud container clusters get-credentials <cluster-name> --zone=<zone-name>`. We can also have the kubeconfig file on some other secure storage system and fetch it from there.</zone-name></cluster-name>
-9. Download Helm and make it executable
-10. Initializing helm, note that we are initializing helm in client only mode so that it doesn’t start the tiller server.
-11. Download the tillerless helm plugin
-12. Execute the release-helloapp.sh shell script and pass it TAG value from step 4.
-
-In the release-helloapp.sh script we first start tiller, after this, we check if the release is already present or not if it is present then we upgrade otherwise we make a new release. Here we override the value of tag for the image present in the chart by setting it to the tag of the newly built image, finally, we stop the tiller server.
-
-
-
-The complete CircleCI config.yml file looks like:
-
-
-
-```yaml
-version: 2
-
+version: 2.1
+orbs:
+  docker: circleci/docker@2.4.0
+  kubernetes: circleci/kubernetes@1.3.1
 
 jobs:
-  build&pushImage:
-    working_directory: /go/src/hello-app
+  build:
     docker:
-      - image: circleci/golang:1.10
+      - image: cimg/go:1.21.5
+        auth:
+          username: $DOCKERHUB_USER
+          password: $DOCKERHUB_PASS
     steps:
       - checkout
-      - run:
-          name: build the binary
-          command: go build -o hello-app
       - setup_remote_docker:
           docker_layer_caching: true
       - run:
-          name: Set the tag for the image, we will concatenate the app verson and circle build number with a `-` char in between
-          command:  echo 'export TAG=$(cat VERSION)-$CIRCLE_BUILD_NUM' >> $BASH_ENV
-      - run:
-          name: Build the docker image
-          command: docker build . -t ${CIRCLE_PROJECT_REPONAME}:$TAG
-      - run:
-          name: Install AWS cli
-          command: export TZ=Europe/Minsk && sudo ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > sudo  /etc/timezone && sudo apt-get update && sudo apt-get install -y awscli
-      - run:
-          name: Login to ECR
-          command: $(aws ecr get-login --region $AWS_REGION | sed -e 's/-e none//g')
-      - run: 
-          name: Tag the image with ECR repo name 
-          command: docker tag ${CIRCLE_PROJECT_REPONAME}:$TAG ${HELLOAPP_ECR_REPO}:$TAG    
-      - run: 
-          name: Push the image the ECR repo
-          command: docker push ${HELLOAPP_ECR_REPO}:$TAG
-  deploy:
-    docker:
-        - image: circleci/golang:1.10
-    steps:
-      - attach_workspace:
-          at: /tmp/workspace
-      - checkout
-      - run:
-          name: Install AWS cli
-          command: export TZ=Europe/Minsk && sudo ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > sudo  /etc/timezone && sudo apt-get update && sudo apt-get install -y awscli
-      - run:
-          name: Set the tag for the image, we will concatenate the app verson and circle build number with a `-` char in between
-          command:  echo 'export TAG=$(cat VERSION)-$CIRCLE_PREVIOUS_BUILD_NUM' >> $BASH_ENV
-      - run:
-          name: Install and confgure kubectl
-          command: sudo curl -L https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && sudo chmod +x /usr/local/bin/kubectl  
-      - run:
-          name: Install and confgure kubectl aws-iam-authenticator
-          command: curl -o aws-iam-authenticator https://amazon-eks.s3-us-west-2.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator && sudo chmod +x ./aws-iam-authenticator && sudo cp ./aws-iam-authenticator /bin/aws-iam-authenticator
-       - run:
-          name: Install latest awscli version
-          command: sudo apt install unzip && curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip" && unzip awscli-bundle.zip &&./awscli-bundle/install -b ~/bin/aws
-      - run:
-          name: Get the kubeconfig file 
-          command: export KUBECONFIG=$HOME/.kube/kubeconfig && /home/circleci/bin/aws eks --region $AWS_REGION update-kubeconfig --name $EKS_CLUSTER_NAME
-      - run:
-          name: Install and configuire helm
-          command: sudo curl -L https://storage.googleapis.com/kubernetes-helm/helm-v2.11.0-linux-amd64.tar.gz | tar xz && sudo mv linux-amd64/helm /bin/helm && sudo rm -rf linux-amd64
-      - run:
-          name: Initialize helm
-          command:  helm init --client-only --kubeconfig=$HOME/.kube/kubeconfig
-      - run:
-          name: Install tiller plugin
-          command: helm plugin install https://github.com/rimusz/helm-tiller --kubeconfig=$HOME/.kube/kubeconfig        
-      - run:
-          name: Release helloapp using helm chart 
-          command: bash scripts/release-helloapp.sh $TAG
-workflows:
-  version: 2
-  primary:
-    jobs:
-      - build&pushImage
-      - deploy:
-          requires:
-            - build&pushImage
+          name: Build and Push Docker Image
+          command: |
+            make docker-build IMG=$BOOKSTORE_OPERATOR_IMG
+            make docker-push IMG=$BOOKSTORE_OPERATOR_IMG
 ```
 
+1. Retrieve username and password and use them to login the DockerHub.
+2. Enable the docker layer caching to accelerate the process of further docker build.
+3. Build the operator docker image and push it to the DockerHub.
 
 
-At the end of the file, we see the workflows, workflows control the order in which the jobs specified in the file are executed and establishes dependencies and conditions for the job. For example, we may want our deploy job trigger only after my build job is complete so we added a dependency between them. Similarly, we may want to exclude the jobs from running on some particular branch then we can specify those type of conditions as well.
 
-We have used a few environment variables in our pipeline configuration some of them were created by us and some were made available by CircleCI. We created AWS_REGION, HELLOAPP_ECR_REPO, EKS_CLUSTER_NAME, AWS_ACCESS_KEY_ID & AWS_SECRET_ACCESS_KEY variables. These variables are set via. CircleCI web console by going to the projects settings. Other variables that we have used are made available by CircleCI as a part of its environment setup process. Complete list of environment variables set by CircleCI can be found [here](https://circleci.com/docs/2.0/env-vars/#built-in-environment-variables).
+```yaml
+  deploy:
+    docker:
+    - image: cimg/go:1.21.5  # needs the go environment to install tools(controller-gen.. etc)
+    steps:
+      - checkout
+      - kubernetes/install-kubectl
+      - run:
+          name: Install Helm 3
+          command: |
+            curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash      
+      - kubernetes/install-kubeconfig:
+          kubeconfig: KUBECONFIG_DATA
+      - run:
+          name: Deploy Kubernetes Artifacts to Cluster
+          command: |
+            make deploy IMG=$BOOKSTORE_OPERATOR_IMG
+```
+
+1. Check out the code and Install the necessary tools.
+2. Retrieve the kubeconfig file and persist it locally.
+3. Deploy the operator and related artifacts to the Kubernetes cluster.
+
+
+
+```yaml
+workflows:
+  workflow:
+    jobs:
+      - build:
+          context:
+            - build-env-vars
+            - docker-hub-creds
+      - deploy:
+          requires:
+            - build
+```
+
+At the end of the file, we see the workflows, workflows control the order in which the jobs specified in the file are executed and establish dependencies and conditions for the job. 
+
+We have used a few environment variables in our pipeline configuration some of them were created by us and some were made available by CircleCI. We created DOCKERHUB_USER, DOCKERHUB_PASS, BOOKSTORE_OPERATOR_IMG and KUBECONFIG_DATA variables. These variables are set via the CircleCI web console by going to the project settings. 
 
 ### Verify the working of the pipeline:
 
-Once everything is set up properly then our application will get deployed on the k8s cluster and should be available for access. Get the external IP of the helloapp service and make a curl request to the hello endpoint
-
-
+Leverage the below command to submit a dummy commit to trigger the workflow.
 
 ```shell
-$ curl http://a31e25e7553af11e994620aebe144c51-242977608.us-west-2.elb.amazonaws.com/hello && printf "\n"
-
-
-{"Msg":"Hello World"}
+git commit --allow-empty -m 'trigger'
 ```
 
 
 
-Now update the code and change the message “Hello World” to “Hello World Returns” and push your code. It will take a few minutes for the pipeline to complete execution and once it is complete make the curl request again to see the changes getting reflected.
-
-
-
-```shell
-$ curl http://a31e25e7553af11e994620aebe144c51-242977608.us-west-2.elb.amazonaws.com/hello && printf "\n"
-
-
-{"Msg":"Hello World Returns"}
-```
-
-
-
-Also, verify that a new tag is also created for the helloapp docker image on ECR.
+Also, verify that the newest image is updated on Docker Hub.
 
 ## Conclusion
 
-In this blog post, we explored how we can set up a CI/CD pipeline for kubernetes and got basic exposure to CircleCI and Helm. Although helm is not absolutely necessary for building a pipeline, it has lots of benefits and is widely used across the industry. We can extend the pipeline to consider the cases where we have multiple environments like dev, staging & production and make the pipeline deploy the application to any of them depending upon some conditions. We can also add more jobs like integration tests. [All the codes used in the blog post are available here](https://github.com/velotiotech/helloapp).
+In this blog post, we explored how we can set up a CI/CD pipeline for Kubernetes and got basic exposure to CircleCI. We can extend the pipeline to consider the cases where we have multiple environments like dev, staging & production and make the pipeline deploy the application to any of them depending upon some conditions. 

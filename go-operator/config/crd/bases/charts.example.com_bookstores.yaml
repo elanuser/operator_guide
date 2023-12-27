@@ -78,6 +78,8 @@ spec:
                     type: integer
                   repository:
                     type: string
+                  storageClass:
+                    type: string
                   tag:
                     type: string
                 type: object

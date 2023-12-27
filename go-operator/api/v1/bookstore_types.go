@@ -41,6 +41,7 @@ type BookDB struct {
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 	Replicas        int32             `json:"replicas,omitempty"`
 	Port            int32             `json:"port,omitempty"`
+	StorageClass    string            `json:"storageClass,omitempty"`
 	DBSize          resource.Quantity `json:"dbSize,omitempty"`
 }
 

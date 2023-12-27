@@ -22,12 +22,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/cri-api/pkg/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -90,13 +90,14 @@ func (r *BookStoreReconciler) ReconcileBookStore(ctx context.Context, bookstore 
 	bookStoreDeployInCluster := &appsv1.Deployment{}
 	err := r.Client.Get(ctx, types.NamespacedName{Name: "bookstore", Namespace: bookstore.Namespace}, bookStoreDeployInCluster)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if err = r.Client.Create(ctx, bookStoreDeploy); err != nil {
-				return err
-			}
+		reqLogger.Info("failed to retrieve the bookstore deployment", "error", err.Error(), "notFound", errors.IsNotFound(err))
+		if !errors.IsNotFound(err) {
+			return err
 		}
-		reqLogger.Info("failed to retrieve bookstore deployment")
-		return err
+		reqLogger.Info("start to create the bookstore deployment")
+		if err = r.Client.Create(ctx, bookStoreDeploy); err != nil {
+			return err
+		}
 	} else if !reflect.DeepEqual(bookStoreDeploy.Spec, bookStoreDeployInCluster.Spec) {
 		bookStoreDeploy.ObjectMeta = bookStoreDeployInCluster.ObjectMeta
 		err = r.Client.Update(ctx, bookStoreDeploy)
@@ -112,14 +113,14 @@ func (r *BookStoreReconciler) ReconcileBookStore(ctx context.Context, bookstore 
 	bookStoreSvcInCluster := &corev1.Service{}
 	err = r.Client.Get(ctx, types.NamespacedName{Name: "bookstore-svc", Namespace: bookstore.Namespace}, bookStoreSvcInCluster)
 	if err != nil {
-		if errors.IsNotFound(err) {
-
-			if err = r.Client.Create(ctx, bookStoreSvc); err != nil {
-				return err
-			}
+		reqLogger.Info("failed to retrieve bookstore service", "IsNotFound", errors.IsNotFound(err))
+		if !errors.IsNotFound(err) {
+			return err
 		}
-		reqLogger.Info("failed to retrieve bookstore service")
-		return err
+		reqLogger.Info("start to create the bookstore service")
+		if err = r.Client.Create(ctx, bookStoreSvc); err != nil {
+			return err
+		}
 	} else if !reflect.DeepEqual(bookStoreSvc.Spec, bookStoreSvcInCluster.Spec) {
 		bookStoreSvc.ObjectMeta = bookStoreSvcInCluster.ObjectMeta
 		bookStoreSvc.Spec.ClusterIP = bookStoreSvcInCluster.Spec.ClusterIP
@@ -135,13 +136,14 @@ func (r *BookStoreReconciler) ReconcileBookStore(ctx context.Context, bookstore 
 	mongoDBStsInCluster := &appsv1.StatefulSet{}
 	err = r.Client.Get(ctx, types.NamespacedName{Name: "mongodb", Namespace: bookstore.Namespace}, mongoDBStsInCluster)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			reqLogger.Info("mongodb StatefulSet not found, will be created")
-			if err = r.Client.Create(ctx, mongoDBSts); err != nil {
-				return err
-			}
-		}
 		reqLogger.Info("failed to retrieve mongodb StatefulSet")
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		reqLogger.Info("start to create the mongodb StatefulSet")
+		if err = r.Client.Create(ctx, mongoDBSts); err != nil {
+			return err
+		}
 		return err
 	} else if !reflect.DeepEqual(mongoDBSts.Spec, mongoDBStsInCluster.Spec) {
 		r.UpdateVolume(bookstore)
@@ -159,12 +161,14 @@ func (r *BookStoreReconciler) ReconcileBookStore(ctx context.Context, bookstore 
 	mongoDBSvcInCluster := &corev1.Service{}
 	err = r.Client.Get(ctx, types.NamespacedName{Name: "mongodb-service", Namespace: bookstore.Namespace}, mongoDBSvcInCluster)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if err = r.Client.Create(ctx, mongoDBSvc); err != nil {
-				return err
-			}
+		reqLogger.Info("failed to retrieve mongodb service")
+		if !errors.IsNotFound(err) {
+			return err
 		}
-		return err
+		reqLogger.Info("start to create the mongodb service")
+		if err = r.Client.Create(ctx, mongoDBSvc); err != nil {
+			return err
+		}
 	} else if !reflect.DeepEqual(mongoDBSvc.Spec, mongoDBSvcInCluster.Spec) {
 		mongoDBSvc.ObjectMeta = mongoDBSvcInCluster.ObjectMeta
 		err = r.Client.Update(ctx, mongoDBSvc)
@@ -180,6 +184,8 @@ func (r *BookStoreReconciler) ReconcileBookStore(ctx context.Context, bookstore 
 
 func (r *BookStoreReconciler) getBookStoreService(bookstore *chartsv1.BookStore) *corev1.Service {
 
+	var labels = map[string]string{"app": "bookstore"}
+
 	return &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Service",
@@ -188,7 +194,7 @@ func (r *BookStoreReconciler) getBookStoreService(bookstore *chartsv1.BookStore)
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "bookstore-svc",
 			Namespace: bookstore.Namespace,
-			Labels:    map[string]string{"app": "bookstore"},
+			Labels:    labels,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{{
@@ -197,12 +203,14 @@ func (r *BookStoreReconciler) getBookStoreService(bookstore *chartsv1.BookStore)
 				TargetPort: intstr.FromInt(bookstore.Spec.BookApp.TargetPort),
 			}},
 			Type:     bookstore.Spec.BookApp.ServiceType,
-			Selector: map[string]string{"app": "bookstore"},
+			Selector: labels,
 		},
 	}
 }
 
 func (r *BookStoreReconciler) getMongoDBService(bookstore *chartsv1.BookStore) *corev1.Service {
+
+	var labels = map[string]string{"app": "bookstore-mongodb"}
 
 	return &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
@@ -212,14 +220,14 @@ func (r *BookStoreReconciler) getMongoDBService(bookstore *chartsv1.BookStore) *
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "mongodb-service",
 			Namespace: bookstore.Namespace,
-			Labels:    map[string]string{"app": "bookstore-mongodb"},
+			Labels:    labels,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{{
 				Name: "tcp-port",
 				Port: bookstore.Spec.BookDB.Port,
 			}},
-			Selector:  map[string]string{"app": "bookstore-mongodb"},
+			Selector:  labels,
 			ClusterIP: "None",
 		},
 	}
@@ -227,9 +235,11 @@ func (r *BookStoreReconciler) getMongoDBService(bookstore *chartsv1.BookStore) *
 
 func (r *BookStoreReconciler) getBookStoreDeploy(bookstore *chartsv1.BookStore) *appsv1.Deployment {
 
+	var labels = map[string]string{"app": "bookstore"}
+
 	podTempSpec := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{"app": "bookstore"},
+			Labels: labels,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
@@ -248,11 +258,11 @@ func (r *BookStoreReconciler) getBookStoreDeploy(bookstore *chartsv1.BookStore) 
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "bookstore",
 			Namespace: bookstore.Namespace,
-			Labels:    map[string]string{"app": "bookstore"},
+			Labels:    labels,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": "bookstore"},
+				MatchLabels: labels,
 			},
 			Replicas: &bookstore.Spec.BookApp.Replicas,
 			Template: podTempSpec,
@@ -262,9 +272,11 @@ func (r *BookStoreReconciler) getBookStoreDeploy(bookstore *chartsv1.BookStore) 
 
 func (r *BookStoreReconciler) getMongoDBStatefulSet(bookstore *chartsv1.BookStore) *appsv1.StatefulSet {
 
+	var labels = map[string]string{"app": "bookstore-mongodb"}
+
 	podTempSpec := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{"app": "bookstore-mongodb"},
+			Labels: labels,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
@@ -283,24 +295,21 @@ func (r *BookStoreReconciler) getMongoDBStatefulSet(bookstore *chartsv1.BookStor
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "mongodb",
 			Namespace: bookstore.Namespace,
-			Labels:    map[string]string{"app": "bookstore-mongodb"},
+			Labels:    labels,
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": "bookstore-mongodb"},
 			},
-			Replicas:    &bookstore.Spec.BookDB.Replicas,
-			Template:    podTempSpec,
-			ServiceName: "mongodb-service",
-			//VolumeClaimTemplates: volClaimTemplate(),
-			VolumeClaimTemplates: r.volClaimTemplate(bookstore.Spec.BookDB.DBSize),
+			Replicas:             &bookstore.Spec.BookDB.Replicas,
+			Template:             podTempSpec,
+			ServiceName:          "mongodb-service",
+			VolumeClaimTemplates: r.volClaimTemplate(bookstore.Spec.BookDB.StorageClass, bookstore.Spec.BookDB.DBSize),
 		},
 	}
 }
 
-func (r *BookStoreReconciler) volClaimTemplate(DBSize resource.Quantity) []corev1.PersistentVolumeClaim {
-
-	storageClass := "standard"
+func (r *BookStoreReconciler) volClaimTemplate(StorageClass string, DBSize resource.Quantity) []corev1.PersistentVolumeClaim {
 
 	return []corev1.PersistentVolumeClaim{{
 		ObjectMeta: metav1.ObjectMeta{
@@ -314,7 +323,7 @@ func (r *BookStoreReconciler) volClaimTemplate(DBSize resource.Quantity) []corev
 					corev1.ResourceStorage: DBSize,
 				},
 			},
-			StorageClassName: &storageClass,
+			StorageClassName: &StorageClass,
 		},
 	}}
 }
